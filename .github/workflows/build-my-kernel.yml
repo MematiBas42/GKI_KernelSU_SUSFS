@@ -1,0 +1,13 @@
+# .github/workflows/build-my-kernel.yml
+
+name: Build My Custom Kernel
+
+# Bu workflow'u GitHub Actions sekmesinden manuel olarak başlatmanı sağlar
+on:
+  workflow_dispatch:
+
+jobs:
+  # Tek bir işimiz var: Belirttiğimiz kerneli derlemek
+  build:
+    # Derleme mantığını içeren diğer dosyayı çağırıyoruz
+    uses: ./.github/workflows/build.yml
