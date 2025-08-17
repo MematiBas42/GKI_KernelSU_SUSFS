@@ -1,51 +1,55 @@
 # .github/workflows/build.yml
 
-name: Core Kernel Build Logic
+name: Core Kernel Build Logic (with SUSFS)
 
 on:
   workflow_call:
 
-# Ortam değişkenlerini burada tanımlıyoruz
+# Ortam değişkenleri, tüm işler tarafından kullanılabilir
 env:
-  # Hedef Kernel Bilgileri
+  # --- Hedef Kernel Bilgileri ---
   ANDROID_VERSION: "android14"
   KERNEL_VERSION: "6.1"
   SUB_LEVEL: "134"
   OS_PATCH_LEVEL: "2025-05"
   
-  # KernelSU varyantı ve branch'ı
-  KERNELSU_VARIANT: "NEXT" # Sadece NEXT derliyoruz
-  KERNELSU_BRANCH: "main"   # KernelSU-Next'in ana branch'ını kullanıyoruz
+  # --- KernelSU Ayarları ---
+  KERNELSU_VARIANT: "NEXT"
+  KERNELSU_BRANCH: "main"
 
 jobs:
   compile:
     runs-on: ubuntu-22.04
     steps:
-      # 1. Derleme ortamını ve gerekli araçları kur
+      # 1. Derleme ortamını ve temel araçları kurar
       - name: Setup Build Environment
         run: |
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex g++-multilib gcc-multilib git gnupg gperf imagemagick lib32ncurses5-dev lib32readline-dev lib32z1-dev libelf-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3
       
-      # 2. Derleyiciyi (Toolchain) indir
+      # 2. Kernel derlemek için gerekli olan derleyiciyi (Toolchain) indirir
       - name: Download Toolchain
         run: git clone --depth=1 https://github.com/LineageOS/android_prebuilts_gcc_linux-x86_aarch64_aarch64-linux-android-4.9.git toolchain
 
-      # 3. GKI kaynak kodunu indir
-      - name: Checkout GKI Source
-        run: git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }} kernel
-
-      # 4. KernelSU kaynak kodunu kernel ağacına dahil et
-      - name: Integrate KernelSU
+      # 3. SUSFS Yamalarıyla Önceden Hazırlanmış GKI Kaynak Kodunu İndir
+      - name: Checkout SUSFS-Patched GKI Source
         run: |
+          echo "Cloning GKI source with integrated SUSFS patches..."
+          git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git -b gki-${{ env.ANDROID_VERSION }}-${{ env.KERNEL_VERSION }} kernel
+          
+      # 4. KernelSU-Next Kaynak Kodunu Kernel Ağacına Dahil Et
+      - name: Integrate KernelSU-Next Source
+        run: |
+          echo "Integrating KernelSU-Next source into the kernel tree..."
           cd kernel
+          # KernelSU-Next'i, kernel kaynak kodunun içindeki 'KernelSU' klasörüne klonluyoruz
           git clone --depth=1 https://github.com/KernelSU-Next/KernelSU-Next.git -b ${{ env.KERNELSU_BRANCH }} KernelSU
           cd ..
 
-      # 5. KENDİ ÖZEL İMZANI KERNEL'E GÖM
+      # 5. ❗ KENDİ ÖZEL İMZANI KERNEL'E GÖM
       - name: Patch Custom Signature
         run: |
-          echo "Patching KernelSU with hardcoded signature..."
+          echo "Patching KernelSU with your hardcoded signature..."
           SIGNATURE_FILE="kernel/KernelSU/include/ksu_signature.h"
           
           # -------------------- ❗❗ ÖNEMLİ DEĞİŞİKLİK BURADA ❗❗ --------------------
@@ -53,21 +57,26 @@ jobs:
           echo '#define SIGNATURE_RAW "BURAYA_KENDİ_EŞSİZ_İMZA_HASHİNİZİ_YAPIŞTIRIN"' > $SIGNATURE_FILE
           # --------------------------------------------------------------------------
 
-          echo "Signature file content:"
+          echo "Signature file content check:"
           cat $SIGNATURE_FILE
 
-      # 6. Kerneli derle
+      # 6. Kerneli Derle
       - name: Build Kernel
         run: |
           cd kernel
+          # Ortam değişkenlerini ve derleyici yolunu ayarlıyoruz
           export PATH="$GITHUB_WORKSPACE/toolchain/bin:$PATH"
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
+          export LLVM=1
+          export LLVM_IAS=1
+          
+          # Kernel yapılandırmasını oluştur ve çok çekirdekli derlemeyi başlat
           make O=out gki_defconfig
           make O=out -j$(nproc --all)
           cd ..
 
-      # 7. Derlenen dosyaları paketle ve artifact olarak kaydet
+      # 7. Derlenmiş Kernel Dosyasını "Artifact" Olarak Yükle
       - name: Package and Upload Artifact
         uses: actions/upload-artifact@v4
         with:
